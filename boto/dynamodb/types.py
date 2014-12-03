@@ -94,7 +94,7 @@ def convert_binary(n):
     return Binary(base64.b64decode(n))
 
 
-def get_dynamodb_type(val):
+def get_dynamodb_type(val, docs=False):
     """
     Take a scalar Python value and return a string representing
     the corresponding Amazon DynamoDB type.  If the value passed in is
@@ -114,20 +114,29 @@ def get_dynamodb_type(val):
             dynamodb_type = 'BS'
     elif is_binary(val):
         dynamodb_type = 'B'
+    elif docs:
+	if isinstance(val, (list, tuple)):
+	    dynamodb_type = 'L'
+	elif isinstance(val, dict):
+	    dynamodb_type = 'M'
+	elif isinstance(val, bool):
+	    dynamodb_type = 'BOOL':
+	elif val is None:
+	    dynamodb_type = 'NULL'
     if dynamodb_type is None:
         msg = 'Unsupported type "%s" for value "%s"' % (type(val), val)
         raise TypeError(msg)
     return dynamodb_type
 
 
-def dynamize_value(val):
+def dynamize_value(val, docs=False):
     """
     Take a scalar Python value and return a dict consisting
     of the Amazon DynamoDB type specification and the value that
     needs to be sent to Amazon DynamoDB.  If the type of the value
     is not supported, raise a TypeError
     """
-    dynamodb_type = get_dynamodb_type(val)
+    dynamodb_type = get_dynamodb_type(val, docs)
     if dynamodb_type == 'N':
         val = {dynamodb_type: serialize_num(val)}
     elif dynamodb_type == 'S':
@@ -142,6 +151,15 @@ def dynamize_value(val):
         val = {dynamodb_type: val.encode()}
     elif dynamodb_type == 'BS':
         val = {dynamodb_type: [n.encode() for n in val]}
+    elif docs:
+	if dynamodb_type == 'BOOL':
+	    val = {dynamodb_type: 'true' if val else 'false'}
+	elif dynamodb_type == 'NULL':
+	    val = {dynamodb_type: 'true'}
+	elif dynamodb_type == 'L':
+	    val = [dynamize_value(v, True) for v in val]
+	elif dynamodb_type == 'M':
+	    val = {k: dynamize_value(v, True) for k, v in val.iteritems()}
     return val
 
 
@@ -247,16 +265,16 @@ class Dynamizer(object):
         'foo'     (Python type)
 
     """
-    def _get_dynamodb_type(self, attr):
-        return get_dynamodb_type(attr)
+    def _get_dynamodb_type(self, attr, docs=False):
+        return get_dynamodb_type(attr, docs)
 
-    def encode(self, attr):
+    def encode(self, attr, docs=False):
         """
         Encodes a python type to the format expected
         by DynamoDB.
 
         """
-        dynamodb_type = self._get_dynamodb_type(attr)
+        dynamodb_type = self._get_dynamodb_type(attr, docs)
         try:
             encoder = getattr(self, '_encode_%s' % dynamodb_type.lower())
         except AttributeError:
